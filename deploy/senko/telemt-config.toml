@@ -37,7 +37,12 @@ listen  = "0.0.0.0:9091"
 # agent reaches Telemt from when running as a sibling container.
 # 127.0.0.1 covers the network_mode=service:telemt setup.
 whitelist = ["127.0.0.1/32", "::1/128", "172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
-minimal_runtime_enabled = false
+# minimal_runtime_enabled gates the DC + ME-writers status under
+# /v1/stats/dcs and /v1/runtime/me/writers. The Panvex agent samples
+# both per cycle; without it the dashboard projects "no reachable DCs"
+# (internal/controlplane/telemetry/projections.go:65) since dc_coverage
+# stays at 0. The 1s cache keeps the cost bounded.
+minimal_runtime_enabled = true
 minimal_runtime_cache_ttl_ms = 1000
 
 [[server.listeners]]
