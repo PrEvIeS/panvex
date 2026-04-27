@@ -1,0 +1,100 @@
+# Panvex deployment for vpn_senko (panvex.azzazelvpn.ru).
+#
+# Topology:
+#   traefik (existing, in /root/vpn-setup) on :443
+#     └─ Host(`panvex.azzazelvpn.ru`) → web:80 (nginx)
+#                                       ├─ /          → SPA static assets
+#                                       └─ /api/      → backend:8080 (control-plane HTTP)
+#   backend gRPC :8443 → host :9443     (auto-TLS from embedded CA — agents bootstrap into this CA)
+#
+# This compose joins the existing `proxy` docker network created by the
+# traefik stack so traefik can reach the `web` container by its docker name.
+#
+# Storage:        SQLite (volume panvex_sqlite_data) — chosen for the 1.9 GB-RAM box.
+# TLS for HTTP:   `proxy` mode — traefik terminates with the existing letsencrypt resolver.
+# TLS for gRPC:   the control-plane mints its own certificate from the embedded CA
+#                 at startup; agents pin that CA via their bootstrap state.
+#
+# Bootstrap:
+#   PANVEX_ENCRYPTION_KEY=$(openssl rand -hex 32) docker compose -f docker-compose.senko.yml up -d
+#   docker compose -f docker-compose.senko.yml exec backend ./panvex-control-plane \
+#     bootstrap-admin -storage-driver sqlite -storage-dsn /var/lib/panvex/panvex.db \
+#     -username admin -password '<pw>'
+
+services:
+  backend:
+    image: panvex-control-plane:senko
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: control-plane
+    container_name: panvex-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Refuses to start without an explicit, non-default key.
+      PANVEX_ENCRYPTION_KEY: ${PANVEX_ENCRYPTION_KEY:?PANVEX_ENCRYPTION_KEY is required}
+    # The Dockerfile already has ENTRYPOINT ["./panvex-control-plane"], so
+    # `command` only carries flags. Listing the binary again would shift it
+    # into argv[1], where Go's flag.Parse treats it as a non-flag and stops
+    # — silently dropping `-config` and falling back to the relative default
+    # DSN `data/panvex.db` (which is unwritable for the non-root `panvex`
+    # user under WORKDIR /app).
+    command:
+      - -config
+      - /etc/panvex/config.toml
+    volumes:
+      - ./config.toml:/etc/panvex/config.toml:ro
+      - panvex_sqlite_data:/var/lib/panvex
+    ports:
+      # gRPC is exposed directly with auto-minted TLS from the embedded CA.
+      # UFW must allow tcp/9443 (handled in deploy.sh).
+      - "9443:8443"
+    networks:
+      - proxy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+        reservations:
+          memory: 128m
+    # Must exceed cmd/control-plane controlPlaneShutdownGraceMin so the
+    # audit-event drain finishes before docker sends SIGKILL.
+    stop_grace_period: 45s
+
+  web:
+    image: panvex-web:senko
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: web
+    container_name: panvex-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      # The web container speaks HTTP on :80; traefik terminates TLS upstream.
+      - "traefik.http.services.panvex.loadbalancer.server.port=80"
+      - "traefik.http.routers.panvex.rule=Host(`panvex.azzazelvpn.ru`)"
+      - "traefik.http.routers.panvex.entrypoints=websecure"
+      - "traefik.http.routers.panvex.tls.certresolver=myresolver"
+      - "traefik.http.routers.panvex.service=panvex"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
+
+volumes:
+  panvex_sqlite_data:
+
+networks:
+  proxy:
+    external: true

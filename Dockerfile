@@ -45,7 +45,8 @@ FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a50
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates && \
-    addgroup -S panvex && adduser -S panvex -G panvex
+    addgroup -S panvex && adduser -S panvex -G panvex && \
+    mkdir -p /var/lib/panvex && chown -R panvex:panvex /var/lib/panvex
 
 COPY --from=control-plane-builder /out/panvex-control-plane ./panvex-control-plane
 

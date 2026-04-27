@@ -1,0 +1,33 @@
+# Panvex control-plane runtime config for the vpn_senko deployment.
+#
+# This file is mounted read-only into the backend container at
+# /etc/panvex/config.toml. Secrets (PANVEX_ENCRYPTION_KEY) live in
+# `.env` next to docker-compose.senko.yml — never inline here.
+
+[storage]
+driver = "sqlite"
+# Resolved relative to the data volume mount; modernc.org/sqlite creates the
+# file on first start when the directory exists.
+dsn = "/var/lib/panvex/panvex.db"
+
+[http]
+# Nginx (the `web` container) proxies /api/ to this address inside the docker
+# network. Traefik terminates TLS upstream, so plaintext is correct here.
+listen_address = ":8080"
+
+[grpc]
+# Agents bootstrap into the embedded CA and pin it; the cert is minted at
+# startup by the control-plane and rotated on its own schedule.
+listen_address = ":8443"
+
+[tls]
+# `proxy` means HTTP TLS is terminated upstream (traefik with
+# certresolver=myresolver via existing acme.json in /root/vpn-setup/traefik/).
+# This setting does NOT affect the gRPC listener — that always serves TLS via
+# the embedded CA.
+mode = "proxy"
+
+[panel]
+# Allows the panel to self-restart (clean exit code 78) when an admin clicks
+# "Apply pending settings" — docker `restart: unless-stopped` brings it back.
+restart_mode = "supervised"
