@@ -1,0 +1,53 @@
+# Telemt config for vpn_senko (Panvex-managed).
+#
+# This config is mounted read-only into the telemt container; the
+# Panvex agent manages users dynamically via Telemt's local API
+# (server.api on 127.0.0.1:9091, see below). The single placeholder
+# user "panvex-bootstrap" is REQUIRED by Telemt to start without
+# error — the agent never references it and operators should not
+# distribute its secret.
+#
+# Port :2443 instead of :443 because vpn_senko's traefik already
+# owns :443. The Fake-TLS SNI uses the panvex panel domain so DPI
+# heuristics that allow only "real" domains keep the proxy reachable.
+
+[general]
+log_level = "normal"
+use_middle_proxy = true
+
+[general.modes]
+classic = false
+secure  = false
+tls     = true
+
+[general.links]
+show = "*"
+public_host = "144.31.122.180"
+public_port = 2443
+
+[server]
+port = 2443
+metrics_listen = "0.0.0.0:9090"
+metrics_whitelist = ["127.0.0.1/32", "::1/128", "172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
+
+[server.api]
+enabled = true
+listen  = "0.0.0.0:9091"
+# 172.16/12 + 10/8 cover the docker bridge ranges that the Panvex
+# agent reaches Telemt from when running as a sibling container.
+# 127.0.0.1 covers the network_mode=service:telemt setup.
+whitelist = ["127.0.0.1/32", "::1/128", "172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
+minimal_runtime_enabled = false
+minimal_runtime_cache_ttl_ms = 1000
+
+[[server.listeners]]
+ip = "0.0.0.0"
+
+[censorship]
+tls_domain     = "panvex.azzazelvpn.ru"
+mask           = true
+tls_emulation  = true
+tls_front_dir  = "/tmp/tlsfront"
+
+[access.users]
+panvex-bootstrap = "00000000000000000000000000000000"

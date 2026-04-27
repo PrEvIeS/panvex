@@ -66,3 +66,8 @@ docs/
 *signing*.key
 *signing-key*.pem
 *.private.pem
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

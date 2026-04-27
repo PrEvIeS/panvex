@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "panvex",
+  "project_id": "39d1b278-4707-489f-ab40-0e8f528c851a"
+}

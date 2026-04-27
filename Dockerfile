@@ -40,6 +40,7 @@ COPY db ./db
 #                    panic stacks/build IDs stay reproducible across
 #                    builders and don't leak host filesystem layout.
 RUN go build -ldflags="-s -w" -trimpath -o /out/panvex-control-plane ./cmd/control-plane
+RUN go build -ldflags="-s -w" -trimpath -o /out/panvex-agent ./cmd/agent
 
 FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS control-plane
 WORKDIR /app
@@ -78,3 +79,21 @@ EXPOSE 80
 # even though the backend may still be reachable from another path.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q -O - http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1
+
+FROM alpine:3.23@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS agent
+WORKDIR /app
+
+# State volume holds agent-state.json (cert + agent_id + grpc endpoint).
+# Owned by the panvex user so the bootstrap subcommand can write it
+# without requiring root inside the container.
+RUN apk add --no-cache ca-certificates && \
+    addgroup -S panvex && adduser -S panvex -G panvex && \
+    mkdir -p /var/lib/panvex-agent && chown -R panvex:panvex /var/lib/panvex-agent
+
+COPY --from=control-plane-builder /out/panvex-agent ./panvex-agent
+
+USER panvex
+
+VOLUME ["/var/lib/panvex-agent"]
+
+ENTRYPOINT ["./panvex-agent"]

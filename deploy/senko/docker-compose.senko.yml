@@ -92,8 +92,110 @@ services:
           memory: 128m
           cpus: "0.5"
 
+  # MTProxy server. Fake-TLS mode (ee-prefix) with SNI = panel domain.
+  # Port :2443 because traefik owns :443 on this host. The local API
+  # binds inside the container on 9091 and is consumed by panvex-agent
+  # over the docker bridge — never exposed to the host or internet.
+  telemt:
+    image: ghcr.io/telemt/telemt:3.4.8
+    container_name: telemt
+    restart: unless-stopped
+    working_dir: /etc/telemt
+    # Telemt persists user state by atomically rewriting config.toml
+    # (api/config_store.rs write_atomic). A read-only bind-mount of the
+    # file under a tmpfs causes the rename(2) to return EPERM, so we
+    # bind-mount the parent dir RW from the host instead and let
+    # `proxy-secret` + TLS-front fingerprints live alongside the
+    # config. deploy.sh seeds telemt-data/config.toml from the repo
+    # copy before the first `compose up`. The host file gets mutated
+    # by telemt as users come and go — that's fine, the panvex agent
+    # re-syncs from the control-plane DB on every boot.
+    volumes:
+      - ./telemt-data:/etc/telemt
+    tmpfs:
+      - /tmp:rw,mode=1777,size=16m
+    ports:
+      - "2443:2443"
+    networks:
+      - proxy
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "/app/telemt", "healthcheck", "/etc/telemt/config.toml", "--mode", "liveness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 262144
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+          cpus: "1.0"
+
+  # Panvex agent. Lives in the `agent` compose profile so a plain
+  # `docker compose up -d` brings up only backend + web + telemt — the
+  # agent refuses to start until its state-file has been seeded by
+  # `docker compose run --rm panvex-agent bootstrap …`. After that,
+  # `docker compose --profile agent up -d` runs it.
+  panvex-agent:
+    image: panvex-agent:senko
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: agent
+    container_name: panvex-agent
+    restart: unless-stopped
+    profiles:
+      - agent
+    depends_on:
+      backend:
+        condition: service_started
+      telemt:
+        condition: service_healthy
+    volumes:
+      - panvex_agent_state:/var/lib/panvex-agent
+    # Share telemt's network namespace. The agent's telemt client
+    # refuses any non-loopback endpoint (internal/agent/telemt/client.go
+    # ErrNonLoopbackEndpoint) — the local API has minimal auth and
+    # leaking it across the docker bridge would let any sibling
+    # container manage proxy users. With network_mode=service:telemt
+    # the agent reaches telemt on 127.0.0.1 and outbound gRPC to the
+    # control-plane goes out through telemt's `proxy` network
+    # attachment.
+    network_mode: service:telemt
+    command:
+      - -state-file
+      - /var/lib/panvex-agent/state.json
+      - -telemt-url
+      - http://127.0.0.1:9091
+      - -telemt-metrics-url
+      - http://127.0.0.1:9090
+      - -node-name
+      - vpn-senko
+      - -version
+      - senko
+      - -fleet-group-id
+      - default
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+
 volumes:
   panvex_sqlite_data:
+  panvex_agent_state:
 
 networks:
   proxy:
