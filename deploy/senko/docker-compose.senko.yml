@@ -97,7 +97,7 @@ services:
   # binds inside the container on 9091 and is consumed by panvex-agent
   # over the docker bridge — never exposed to the host or internet.
   telemt:
-    image: ghcr.io/telemt/telemt:3.4.8
+    image: ghcr.io/telemt/telemt:3.4.12
     container_name: telemt
     restart: unless-stopped
     working_dir: /etc/telemt
